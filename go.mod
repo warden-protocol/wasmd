@@ -222,6 +222,9 @@ replace (
 
 	// pin version! 126854af5e6d has issues with the store so that queries fail
 	github.com/syndtr/goleveldb => github.com/syndtr/goleveldb v1.0.1-0.20210819022825-2ae1ddf74ef7
+
+	// TODO tkulik: UNDO
+	github.com/CosmWasm/wasmvm/v2 => /home/tkulik/Workspace/wasmvm
 )
 
 retract (

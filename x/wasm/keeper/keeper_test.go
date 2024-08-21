@@ -1356,6 +1356,15 @@ func TestMigrate(t *testing.T) {
 			migrateMsg: migMsgBz,
 			expErr:     types.ErrMigrationFailed,
 		},
+		"fail when contract expect previous version present": {
+			admin:      fred,
+			caller:     fred,
+			initMsg:    initMsgBz,
+			fromCodeID: originalCodeID,
+			toCodeID:   hackatom420.CodeID,
+			migrateMsg: migMsgBz,
+			expErr:     types.ErrMigrationFailed,
+		},
 		"all good with migrate versions": {
 			admin:       creator,
 			caller:      creator,
