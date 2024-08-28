@@ -554,7 +554,7 @@ func (k Keeper) callMigrateEntrypoint(
 	msg []byte,
 	newCodeID uint64,
 	senderAddress sdk.AccAddress,
-	OldMigrateVersion *uint64,
+	oldMigrateVersion *uint64,
 ) (*wasmvmtypes.Response, error) {
 	setupCost := k.gasRegister.SetupContractCost(k.IsPinnedCode(sdkCtx, newCodeID), len(msg))
 	sdkCtx.GasMeter().ConsumeGas(setupCost, "Loading CosmWasm module: migrate")
@@ -570,26 +570,9 @@ func (k Keeper) callMigrateEntrypoint(
 
 	migrateInfo := wasmvmtypes.MigrateInfo{
 		Sender:            senderAddress.String(),
-		OldMigrateVersion: OldMigrateVersion,
+		OldMigrateVersion: oldMigrateVersion,
 	}
-	var res *wasmvmtypes.ContractResult
-	var gasUsed uint64
-	var err error
-	if OldMigrateVersion == nil {
-		res, gasUsed, err = k.wasmVM.Migrate(newChecksum, env, msg, vmStore, cosmwasmAPI, &querier, k.gasMeter(sdkCtx), gasLeft, costJSONDeserialization)
-		if err != nil {
-			if strings.Contains(err.Error(), "The called function args arity does not match") {
-				res, gasUsed, err = k.wasmVM.MigrateWithInfo(newChecksum, env, msg, migrateInfo, vmStore, cosmwasmAPI, &querier, k.gasMeter(sdkCtx), gasLeft, costJSONDeserialization)
-			}
-		}
-	} else {
-		res, gasUsed, err = k.wasmVM.MigrateWithInfo(newChecksum, env, msg, migrateInfo, vmStore, cosmwasmAPI, &querier, k.gasMeter(sdkCtx), gasLeft, costJSONDeserialization)
-		if err != nil {
-			if strings.Contains(err.Error(), "The called function args arity does not match") {
-				res, gasUsed, err = k.wasmVM.Migrate(newChecksum, env, msg, vmStore, cosmwasmAPI, &querier, k.gasMeter(sdkCtx), gasLeft, costJSONDeserialization)
-			}
-		}
-	}
+	res, gasUsed, err := k.wasmVM.MigrateWithInfo(newChecksum, env, msg, migrateInfo, vmStore, cosmwasmAPI, &querier, k.gasMeter(sdkCtx), gasLeft, costJSONDeserialization)
 
 	k.consumeRuntimeGas(sdkCtx, gasUsed)
 	if err != nil {
