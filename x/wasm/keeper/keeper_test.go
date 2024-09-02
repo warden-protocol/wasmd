@@ -45,7 +45,7 @@ var hackatomWasm []byte
 
 var AvailableCapabilities = []string{
 	"iterator", "staking", "stargate", "cosmwasm_1_1", "cosmwasm_1_2", "cosmwasm_1_3",
-	"cosmwasm_1_4", "cosmwasm_2_0", "cosmwasm_2_1",
+	"cosmwasm_1_4", "cosmwasm_2_0", "cosmwasm_2_1", "cosmwasm_2_2",
 }
 
 func TestNewKeeper(t *testing.T) {
@@ -1356,15 +1356,6 @@ func TestMigrate(t *testing.T) {
 			migrateMsg: migMsgBz,
 			expErr:     types.ErrMigrationFailed,
 		},
-		"fail when contract expect previous version present": {
-			admin:      fred,
-			caller:     fred,
-			initMsg:    initMsgBz,
-			fromCodeID: originalCodeID,
-			toCodeID:   hackatom420.CodeID,
-			migrateMsg: migMsgBz,
-			expErr:     types.ErrMigrationFailed,
-		},
 		"all good with migrate versions": {
 			admin:       creator,
 			caller:      creator,
@@ -1401,14 +1392,14 @@ func TestMigrate(t *testing.T) {
 			migrateMsg:  migMsgBz,
 			expVerifier: newVerifierAddr,
 		},
-		"all good with migration to older migrate version": {
-			admin:       creator,
-			caller:      creator,
-			initMsg:     initMsgBz,
-			fromCodeID:  hackatom420.CodeID,
-			toCodeID:    hackatom42.CodeID,
-			migrateMsg:  migMsgBz,
-			expVerifier: newVerifierAddr,
+		"contract returns error when downgrading version": {
+			admin:      creator,
+			caller:     creator,
+			initMsg:    initMsgBz,
+			fromCodeID: hackatom420.CodeID,
+			toCodeID:   hackatom42.CodeID,
+			migrateMsg: migMsgBz,
+			expErr:     types.ErrMigrationFailed,
 		},
 	}
 
