@@ -220,7 +220,12 @@ require (
 )
 
 replace (
+
+	// need this replace to pick up the store changes (Copy func) in our cosmos-sdk fork
+	cosmossdk.io/store => github.com/evmos/cosmos-sdk/store v0.0.0-20240718141609-414cbd051fbe
 	github.com/99designs/keyring => github.com/cosmos/keyring v1.2.0
+	// evmos integration
+	github.com/cosmos/cosmos-sdk => github.com/warden-protocol/cosmos-sdk v0.50.9-evmos-warden
 	// dgrijalva/jwt-go is deprecated and doesn't receive security updates.
 	// See: https://github.com/cosmos/cosmos-sdk/issues/13134
 	github.com/dgrijalva/jwt-go => github.com/golang-jwt/jwt/v4 v4.4.2
