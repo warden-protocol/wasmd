@@ -1,10 +1,11 @@
 package types
 
 import (
+	"encoding/hex"
 	"fmt"
 	"reflect"
 
-	wasmvmtypes "github.com/CosmWasm/wasmvm/v2/types"
+	wasmvmtypes "github.com/CosmWasm/wasmvm/v3/types"
 	"github.com/cosmos/gogoproto/proto"
 
 	errorsmod "cosmossdk.io/errors"
@@ -19,11 +20,12 @@ const (
 	defaultSmartQueryGasLimit uint64 = 3_000_000
 	defaultContractDebugMode         = false
 
-	// ContractAddrLen defines a valid address length for contracts
-	ContractAddrLen = 32
 	// SDKAddrLen defines a valid address length that was used in sdk address generation
 	SDKAddrLen = 20
 )
+
+// ContractAddrLen defines a valid address length for contracts
+var ContractAddrLen = 32
 
 func (m Model) ValidateBasic() error {
 	if len(m.Key) == 0 {
@@ -314,8 +316,14 @@ func NewWasmCoins(cosmosCoins sdk.Coins) (wasmCoins []wasmvmtypes.Coin) {
 	return wasmCoins
 }
 
-// WasmConfig is the extra config required for wasm
-type WasmConfig struct {
+// VMConfig contains configurations that are passed on to CosmWasm VM.
+type VMConfig struct {
+	// WasmLimits are the limits that are used for static validation of Wasm binaries.
+	WasmLimits wasmvmtypes.WasmLimits
+}
+
+// NodeConfig is the extra config required for wasm
+type NodeConfig struct {
 	// SimulationGasLimit is the max gas to be used in a tx simulation call.
 	// When not set the consensus max block gas is used instead
 	SimulationGasLimit *uint64 `mapstructure:"simulation_gas_limit"`
@@ -327,9 +335,9 @@ type WasmConfig struct {
 	ContractDebugMode bool
 }
 
-// DefaultWasmConfig returns the default settings for WasmConfig
-func DefaultWasmConfig() WasmConfig {
-	return WasmConfig{
+// DefaultNodeConfig returns the default settings for NodeConfig
+func DefaultNodeConfig() NodeConfig {
+	return NodeConfig{
 		SmartQueryGasLimit: defaultSmartQueryGasLimit,
 		MemoryCacheSize:    defaultMemoryCacheSize,
 		ContractDebugMode:  defaultContractDebugMode,
@@ -338,11 +346,11 @@ func DefaultWasmConfig() WasmConfig {
 
 // DefaultConfigTemplate toml snippet with default values for app.toml
 func DefaultConfigTemplate() string {
-	return ConfigTemplate(DefaultWasmConfig())
+	return ConfigTemplate(DefaultNodeConfig())
 }
 
 // ConfigTemplate toml snippet for app.toml
-func ConfigTemplate(c WasmConfig) string {
+func ConfigTemplate(c NodeConfig) string {
 	simGasLimit := `# simulation_gas_limit =`
 	if c.SimulationGasLimit != nil {
 		simGasLimit = fmt.Sprintf(`simulation_gas_limit = %d`, *c.SimulationGasLimit)
@@ -428,4 +436,34 @@ func (a AccessConfig) AllAuthorizedAddresses() []string {
 		return a.Addresses
 	}
 	return []string{}
+}
+
+type txContracts map[string]struct{}
+
+type TxContracts struct {
+	// contracts contains the contracts (identified by checksum) which have already been executed in a transaction
+	contracts txContracts
+}
+
+func NewTxContracts() TxContracts {
+	c := make(txContracts, 0)
+	return TxContracts{contracts: c}
+}
+
+func (tc TxContracts) AddContract(checksum []byte) {
+	if len(checksum) == 0 {
+		return
+	}
+	hexHash := hex.EncodeToString(checksum)
+	tc.contracts[hexHash] = struct{}{}
+}
+
+func (tc TxContracts) Exists(checksum []byte) bool {
+	hexHash := hex.EncodeToString(checksum)
+	_, ok := tc.contracts[hexHash]
+	return ok
+}
+
+func (tc TxContracts) GetContracts() txContracts {
+	return tc.contracts
 }

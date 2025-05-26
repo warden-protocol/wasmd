@@ -3,11 +3,12 @@ package wasm
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"runtime/debug"
 	"strings"
 
-	wasmvm "github.com/CosmWasm/wasmvm/v2"
+	wasmvm "github.com/CosmWasm/wasmvm/v3"
 	abci "github.com/cometbft/cometbft/abci/types"
 	"github.com/grpc-ecosystem/grpc-gateway/runtime"
 	"github.com/spf13/cast"
@@ -222,7 +223,7 @@ func (am AppModule) WeightedOperations(simState module.SimulationState) []simtyp
 
 // AddModuleInitFlags implements servertypes.ModuleInitFlags interface.
 func AddModuleInitFlags(startCmd *cobra.Command) {
-	defaults := types.DefaultWasmConfig()
+	defaults := types.DefaultNodeConfig()
 	startCmd.Flags().Uint32(flagWasmMemoryCacheSize, defaults.MemoryCacheSize, "Sets the size in MiB (NOT bytes) of an in-memory cache for Wasm modules. Set to 0 to disable.")
 	startCmd.Flags().Uint64(flagWasmQueryGasLimit, defaults.SmartQueryGasLimit, "Set the max gas that can be spent on executing a query with a Wasm contract")
 	startCmd.Flags().String(flagWasmSimulationGasLimit, "", "Set the max gas that can be spent when executing a simulation TX")
@@ -242,9 +243,9 @@ func AddModuleInitFlags(startCmd *cobra.Command) {
 	startCmd.PreRunE = chainPreRuns(preCheck, startCmd.PreRunE)
 }
 
-// ReadWasmConfig reads the wasm specifig configuration
-func ReadWasmConfig(opts servertypes.AppOptions) (types.WasmConfig, error) {
-	cfg := types.DefaultWasmConfig()
+// ReadNodeConfig reads the node specific configuration
+func ReadNodeConfig(opts servertypes.AppOptions) (types.NodeConfig, error) {
+	cfg := types.DefaultNodeConfig()
 	var err error
 	if v := opts.Get(flagWasmMemoryCacheSize); v != nil {
 		if cfg.MemoryCacheSize, err = cast.ToUint32E(v); err != nil {
@@ -280,7 +281,7 @@ func getExpectedLibwasmVersion() string {
 		panic("can't read build info")
 	}
 	for _, d := range buildInfo.Deps {
-		if d.Path != "github.com/CosmWasm/wasmvm/v2" {
+		if d.Path != "github.com/CosmWasm/wasmvm/v3" {
 			continue
 		}
 		if d.Replace != nil {
@@ -304,7 +305,7 @@ func getExpectedLibwasmVersion() string {
 // `wasmd query wasm libwasmvm-version`.
 func CheckLibwasmVersion(wasmExpectedVersion string) error {
 	if wasmExpectedVersion == "" {
-		return fmt.Errorf("wasmvm module not exist")
+		return errors.New("wasmvm module not exist")
 	}
 	wasmVersion, err := wasmvm.LibwasmvmVersion()
 	if err != nil {

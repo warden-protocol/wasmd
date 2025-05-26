@@ -9,7 +9,7 @@ import (
 	"testing"
 	"time"
 
-	wasmvm "github.com/CosmWasm/wasmvm/v2"
+	wasmvm "github.com/CosmWasm/wasmvm/v3"
 	abci "github.com/cometbft/cometbft/abci/types"
 	cmtproto "github.com/cometbft/cometbft/proto/tendermint/types"
 	dbm "github.com/cosmos/cosmos-db"
@@ -655,9 +655,7 @@ func TestImportContractWithCodeHistoryPreserved(t *testing.T) {
 
 func setupKeeper(t *testing.T) (*Keeper, sdk.Context) {
 	t.Helper()
-	tempDir, err := os.MkdirTemp("", "wasm")
-	require.NoError(t, err)
-	t.Cleanup(func() { os.RemoveAll(tempDir) })
+	tempDir := t.TempDir()
 
 	keyWasm := storetypes.NewKVStoreKey(types.StoreKey)
 
@@ -680,7 +678,7 @@ func setupKeeper(t *testing.T) (*Keeper, sdk.Context) {
 	// also registering gov interfaces for nested Any type
 	v1beta1.RegisterInterfaces(encodingConfig.InterfaceRegistry)
 
-	wasmConfig := types.DefaultWasmConfig()
+	nodeConfig := types.DefaultNodeConfig()
 
 	srcKeeper := NewKeeper(
 		encodingConfig.Codec,
@@ -695,11 +693,12 @@ func setupKeeper(t *testing.T) (*Keeper, sdk.Context) {
 		nil,
 		nil,
 		nil,
-		nil,
 		tempDir,
-		wasmConfig,
+		nodeConfig,
+		types.VMConfig{},
 		AvailableCapabilities,
 		authtypes.NewModuleAddress(govtypes.ModuleName).String(),
+		nil,
 	)
 	return &srcKeeper, ctx
 }

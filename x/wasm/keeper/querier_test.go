@@ -9,8 +9,9 @@ import (
 	"testing"
 	"time"
 
-	wasmvm "github.com/CosmWasm/wasmvm/v2"
-	wasmvmtypes "github.com/CosmWasm/wasmvm/v2/types"
+	wasmvm "github.com/CosmWasm/wasmvm/v3"
+	wasmvmtypes "github.com/CosmWasm/wasmvm/v3/types"
+	dbm "github.com/cosmos/cosmos-db"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 	"google.golang.org/grpc/codes"
@@ -177,7 +178,7 @@ func TestQuerySmartContractPanics(t *testing.T) {
 		CodeID:  1,
 		Created: types.NewAbsoluteTxPosition(ctx),
 	})
-	ctx = ctx.WithGasMeter(storetypes.NewGasMeter(types.DefaultInstanceCost)).WithLogger(log.NewTestLogger(t))
+	gasLimit := types.DefaultInstanceCost + 5000
 
 	specs := map[string]struct {
 		doInContract func()
@@ -185,7 +186,7 @@ func TestQuerySmartContractPanics(t *testing.T) {
 	}{
 		"out of gas": {
 			doInContract: func() {
-				ctx.GasMeter().ConsumeGas(ctx.GasMeter().Limit()+1, "test - consume more than limit")
+				ctx.GasMeter().ConsumeGas(gasLimit+1, "test - consume more than limit")
 			},
 			expErr: sdkErrors.ErrOutOfGas,
 		},
@@ -198,6 +199,9 @@ func TestQuerySmartContractPanics(t *testing.T) {
 	}
 	for msg, spec := range specs {
 		t.Run(msg, func(t *testing.T) {
+			// reset gas meter
+			ctx = ctx.WithGasMeter(storetypes.NewGasMeter(gasLimit)).WithLogger(log.NewTestLogger(t))
+
 			keepers.WasmKeeper.wasmVM = &wasmtesting.MockWasmEngine{QueryFn: func(checksum wasmvm.Checksum, env wasmvmtypes.Env, queryMsg []byte, store wasmvm.KVStore, goapi wasmvm.GoAPI, querier wasmvm.Querier, gasMeter wasmvm.GasMeter, gasLimit uint64, deserCost wasmvmtypes.UFraction) (*wasmvmtypes.QueryResult, uint64, error) {
 				spec.doInContract()
 				return &wasmvmtypes.QueryResult{}, 0, nil
@@ -686,6 +690,52 @@ func TestQueryContractInfo(t *testing.T) {
 	}
 }
 
+func TestQueryWasmLimitsConfig(t *testing.T) {
+	cfg := types.VMConfig{}
+
+	fifteen := uint32(15)
+
+	specs := map[string]struct {
+		limits  wasmvmtypes.WasmLimits
+		expJSON []byte
+	}{
+		"all 15": {
+			limits: wasmvmtypes.WasmLimits{
+				InitialMemoryLimitPages: &fifteen,
+				TableSizeLimitElements:  &fifteen,
+				MaxImports:              &fifteen,
+				MaxFunctions:            &fifteen,
+				MaxFunctionParams:       &fifteen,
+				MaxTotalFunctionParams:  &fifteen,
+				MaxFunctionResults:      &fifteen,
+			},
+			expJSON: []byte(`{"initial_memory_limit_pages":15,"table_size_limit_elements":15,"max_imports":15,"max_functions":15,"max_function_params":15,"max_total_function_params":15,"max_function_results":15}`),
+		},
+		"empty": {
+			limits:  wasmvmtypes.WasmLimits{},
+			expJSON: []byte("{}"),
+		},
+	}
+
+	for name, spec := range specs {
+		t.Run(name, func(t *testing.T) {
+			cfg.WasmLimits = spec.limits
+
+			ctx, keepers := createTestInput(t, false, AvailableCapabilities, types.DefaultNodeConfig(), cfg, dbm.NewMemDB())
+			keeper := keepers.WasmKeeper
+
+			q := Querier(keeper)
+
+			response, err := q.WasmLimitsConfig(ctx, &types.QueryWasmLimitsConfigRequest{})
+			require.NoError(t, err)
+			require.NotNil(t, response)
+
+			assert.Equal(t, string(spec.expJSON), response.Config)
+			// assert.Equal(t, spec.expJSON, []byte(response.Config))
+		})
+	}
+}
+
 func TestQueryPinnedCodes(t *testing.T) {
 	ctx, keepers := CreateTestInput(t, false, AvailableCapabilities)
 	keeper := keepers.WasmKeeper
@@ -775,6 +825,58 @@ func TestQueryParams(t *testing.T) {
 }
 
 func TestQueryCodeInfo(t *testing.T) {
+	wasmCode, err := os.ReadFile("./testdata/hackatom.wasm")
+	require.NoError(t, err)
+
+	ctx, keepers := CreateTestInput(t, false, AvailableCapabilities)
+	keeper := keepers.WasmKeeper
+
+	anyAddress, err := sdk.AccAddressFromBech32("cosmos100dejzacpanrldpjjwksjm62shqhyss44jf5xz")
+	require.NoError(t, err)
+	specs := map[string]struct {
+		codeID       uint64
+		accessConfig types.AccessConfig
+	}{
+		"everybody": {
+			codeID:       1,
+			accessConfig: types.AllowEverybody,
+		},
+		"nobody": {
+			codeID:       10,
+			accessConfig: types.AllowNobody,
+		},
+		"with_address": {
+			codeID:       20,
+			accessConfig: types.AccessTypeAnyOfAddresses.With(anyAddress),
+		},
+	}
+	for msg, spec := range specs {
+		t.Run(msg, func(t *testing.T) {
+			codeInfo := types.CodeInfoFixture(types.WithSHA256CodeHash(wasmCode))
+			codeInfo.InstantiateConfig = spec.accessConfig
+			require.NoError(t, keeper.importCode(ctx, spec.codeID,
+				codeInfo,
+				wasmCode),
+			)
+
+			q := Querier(keeper)
+			got, err := q.CodeInfo(ctx, &types.QueryCodeInfoRequest{
+				CodeId: spec.codeID,
+			})
+			require.NoError(t, err)
+			expectedResponse := &types.QueryCodeInfoResponse{
+				CodeID:                spec.codeID,
+				Creator:               codeInfo.Creator,
+				Checksum:              codeInfo.CodeHash,
+				InstantiatePermission: spec.accessConfig,
+			}
+			require.NotNil(t, got)
+			require.EqualValues(t, expectedResponse, got)
+		})
+	}
+}
+
+func TestQueryCode(t *testing.T) {
 	wasmCode, err := os.ReadFile("./testdata/hackatom.wasm")
 	require.NoError(t, err)
 
@@ -925,13 +1027,13 @@ func TestQueryContractsByCreatorList(t *testing.T) {
 		return ctx
 	}
 
-	var allExpecedContracts []string
+	var allExpectedContracts []string
 	// create 10 contracts with real block/gas setup
 	for i := 0; i < 10; i++ {
 		ctx = setBlock(ctx, h)
 		h++
 		contract, _, err := keepers.ContractKeeper.Instantiate(ctx, codeID, creator, nil, initMsgBz, fmt.Sprintf("contract %d", i), topUp)
-		allExpecedContracts = append(allExpecedContracts, contract.String())
+		allExpectedContracts = append(allExpectedContracts, contract.String())
 		require.NoError(t, err)
 	}
 
@@ -944,7 +1046,7 @@ func TestQueryContractsByCreatorList(t *testing.T) {
 			srcQuery: &types.QueryContractsByCreatorRequest{
 				CreatorAddress: creator.String(),
 			},
-			expContractAddr: allExpecedContracts,
+			expContractAddr: allExpectedContracts,
 			expErr:          nil,
 		},
 		"with pagination offset": {
@@ -963,19 +1065,19 @@ func TestQueryContractsByCreatorList(t *testing.T) {
 					Limit: 1,
 				},
 			},
-			expContractAddr: allExpecedContracts[0:1],
+			expContractAddr: allExpectedContracts[0:1],
 			expErr:          nil,
 		},
 		"nil creator": {
 			srcQuery: &types.QueryContractsByCreatorRequest{
 				Pagination: &query.PageRequest{},
 			},
-			expContractAddr: allExpecedContracts,
+			expContractAddr: allExpectedContracts,
 			expErr:          errors.New("empty address string is not allowed"),
 		},
 		"nil req": {
 			srcQuery:        nil,
-			expContractAddr: allExpecedContracts,
+			expContractAddr: allExpectedContracts,
 			expErr:          status.Error(codes.InvalidArgument, "empty request"),
 		},
 	}

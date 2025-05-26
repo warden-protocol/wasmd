@@ -5,7 +5,7 @@ import (
 	"strings"
 	"testing"
 
-	wasmvmtypes "github.com/CosmWasm/wasmvm/v2/types"
+	wasmvmtypes "github.com/CosmWasm/wasmvm/v3/types"
 	"github.com/stretchr/testify/assert"
 
 	storetypes "cosmossdk.io/store/types"
@@ -306,7 +306,7 @@ func TestFromWasmVMGasConversion(t *testing.T) {
 			src: math.MaxUint64,
 			exp: math.MaxUint64,
 		},
-		"missconfigured": {
+		"misconfigured": {
 			srcConfig: WasmGasRegisterConfig{
 				GasMultiplier: 0,
 			},

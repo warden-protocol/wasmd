@@ -5,7 +5,9 @@ package keeper
 import (
 	"path/filepath"
 
-	wasmvm "github.com/CosmWasm/wasmvm/v2"
+	wasmvm "github.com/CosmWasm/wasmvm/v3"
+	wasmvmtypes "github.com/CosmWasm/wasmvm/v3/types"
+	ibcapi "github.com/cosmos/ibc-go/v10/modules/core/api"
 
 	"cosmossdk.io/collections"
 	corestoretypes "cosmossdk.io/core/store"
@@ -26,15 +28,16 @@ func NewKeeper(
 	distrKeeper types.DistributionKeeper,
 	ics4Wrapper types.ICS4Wrapper,
 	channelKeeper types.ChannelKeeper,
-	portKeeper types.PortKeeper,
-	capabilityKeeper types.CapabilityKeeper,
+	channelKeeperV2 types.ChannelKeeperV2,
 	portSource types.ICS20TransferPortSource,
 	router MessageRouter,
 	_ GRPCQueryRouter,
 	homeDir string,
-	wasmConfig types.WasmConfig,
+	nodeConfig types.NodeConfig,
+	vmConfig types.VMConfig,
 	availableCapabilities []string,
 	authority string,
+	ibcRouterV2 *ibcapi.Router,
 	opts ...Option,
 ) Keeper {
 	sb := collections.NewSchemaBuilder(storeService)
@@ -45,9 +48,7 @@ func NewKeeper(
 		accountKeeper:        accountKeeper,
 		bank:                 NewBankCoinTransferrer(bankKeeper),
 		accountPruner:        NewVestingCoinBurner(bankKeeper),
-		portKeeper:           portKeeper,
-		capabilityKeeper:     capabilityKeeper,
-		queryGasLimit:        wasmConfig.SmartQueryGasLimit,
+		queryGasLimit:        nodeConfig.SmartQueryGasLimit,
 		gasRegister:          types.NewDefaultWasmGasRegister(),
 		maxQueryStackSize:    types.DefaultMaxQueryStackSize,
 		maxCallDepth:         types.DefaultMaxCallDepth,
@@ -56,9 +57,11 @@ func NewKeeper(
 		propagateGovAuthorization: map[types.AuthorizationPolicyAction]struct{}{
 			types.AuthZActionInstantiate: {},
 		},
-		authority: authority,
+		authority:   authority,
+		wasmLimits:  vmConfig.WasmLimits,
+		ibcRouterV2: ibcRouterV2,
 	}
-	keeper.messenger = NewDefaultMessageHandler(keeper, router, ics4Wrapper, channelKeeper, capabilityKeeper, bankKeeper, cdc, portSource)
+	keeper.messenger = NewDefaultMessageHandler(keeper, router, ics4Wrapper, channelKeeperV2, bankKeeper, cdc, portSource)
 	keeper.wasmVMQueryHandler = DefaultQueryPlugins(bankKeeper, stakingKeeper, distrKeeper, channelKeeper, keeper)
 	preOpts, postOpts := splitOpts(opts)
 	for _, o := range preOpts {
@@ -70,7 +73,15 @@ func NewKeeper(
 	// NewVM does a lot, so better not to create it and silently drop it.
 	if keeper.wasmVM == nil {
 		var err error
-		keeper.wasmVM, err = wasmvm.NewVM(filepath.Join(homeDir, "wasm"), availableCapabilities, contractMemoryLimit, wasmConfig.ContractDebugMode, wasmConfig.MemoryCacheSize)
+		keeper.wasmVM, err = wasmvm.NewVMWithConfig(wasmvmtypes.VMConfig{
+			Cache: wasmvmtypes.CacheOptions{
+				BaseDir:                  filepath.Join(homeDir, "wasm"),
+				AvailableCapabilities:    availableCapabilities,
+				MemoryCacheSizeBytes:     wasmvmtypes.NewSizeMebi(nodeConfig.MemoryCacheSize),
+				InstanceMemoryLimitBytes: wasmvmtypes.NewSizeMebi(contractMemoryLimit),
+			},
+			WasmLimits: vmConfig.WasmLimits,
+		}, nodeConfig.ContractDebugMode)
 		if err != nil {
 			panic(err)
 		}

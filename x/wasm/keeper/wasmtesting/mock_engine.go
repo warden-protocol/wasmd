@@ -3,8 +3,8 @@ package wasmtesting
 import (
 	"bytes"
 
-	wasmvm "github.com/CosmWasm/wasmvm/v2"
-	wasmvmtypes "github.com/CosmWasm/wasmvm/v2/types"
+	wasmvm "github.com/CosmWasm/wasmvm/v3"
+	wasmvmtypes "github.com/CosmWasm/wasmvm/v3/types"
 	"github.com/cometbft/cometbft/libs/rand"
 
 	errorsmod "cosmossdk.io/errors"
@@ -24,11 +24,13 @@ var _ types.WasmEngine = &MockWasmEngine{}
 type MockWasmEngine struct {
 	StoreCodeFn              func(codeID wasmvm.WasmCode, gasLimit uint64) (wasmvm.Checksum, uint64, error)
 	StoreCodeUncheckedFn     func(codeID wasmvm.WasmCode) (wasmvm.Checksum, error)
+	SimulateStoreCodeFn      func(codeID wasmvm.WasmCode, gasLimit uint64) (wasmvm.Checksum, uint64, error)
 	AnalyzeCodeFn            func(codeID wasmvm.Checksum) (*wasmvmtypes.AnalysisReport, error)
 	InstantiateFn            func(codeID wasmvm.Checksum, env wasmvmtypes.Env, info wasmvmtypes.MessageInfo, initMsg []byte, store wasmvm.KVStore, goapi wasmvm.GoAPI, querier wasmvm.Querier, gasMeter wasmvm.GasMeter, gasLimit uint64, deserCost wasmvmtypes.UFraction) (*wasmvmtypes.ContractResult, uint64, error)
 	ExecuteFn                func(codeID wasmvm.Checksum, env wasmvmtypes.Env, info wasmvmtypes.MessageInfo, executeMsg []byte, store wasmvm.KVStore, goapi wasmvm.GoAPI, querier wasmvm.Querier, gasMeter wasmvm.GasMeter, gasLimit uint64, deserCost wasmvmtypes.UFraction) (*wasmvmtypes.ContractResult, uint64, error)
 	QueryFn                  func(codeID wasmvm.Checksum, env wasmvmtypes.Env, queryMsg []byte, store wasmvm.KVStore, goapi wasmvm.GoAPI, querier wasmvm.Querier, gasMeter wasmvm.GasMeter, gasLimit uint64, deserCost wasmvmtypes.UFraction) (*wasmvmtypes.QueryResult, uint64, error)
 	MigrateFn                func(codeID wasmvm.Checksum, env wasmvmtypes.Env, migrateMsg []byte, store wasmvm.KVStore, goapi wasmvm.GoAPI, querier wasmvm.Querier, gasMeter wasmvm.GasMeter, gasLimit uint64, deserCost wasmvmtypes.UFraction) (*wasmvmtypes.ContractResult, uint64, error)
+	MigrateWithInfoFn        func(codeID wasmvm.Checksum, env wasmvmtypes.Env, migrateMsg []byte, migrateInfo wasmvmtypes.MigrateInfo, store wasmvm.KVStore, goapi wasmvm.GoAPI, querier wasmvm.Querier, gasMeter wasmvm.GasMeter, gasLimit uint64, deserCost wasmvmtypes.UFraction) (*wasmvmtypes.ContractResult, uint64, error)
 	SudoFn                   func(codeID wasmvm.Checksum, env wasmvmtypes.Env, sudoMsg []byte, store wasmvm.KVStore, goapi wasmvm.GoAPI, querier wasmvm.Querier, gasMeter wasmvm.GasMeter, gasLimit uint64, deserCost wasmvmtypes.UFraction) (*wasmvmtypes.ContractResult, uint64, error)
 	ReplyFn                  func(codeID wasmvm.Checksum, env wasmvmtypes.Env, reply wasmvmtypes.Reply, store wasmvm.KVStore, goapi wasmvm.GoAPI, querier wasmvm.Querier, gasMeter wasmvm.GasMeter, gasLimit uint64, deserCost wasmvmtypes.UFraction) (*wasmvmtypes.ContractResult, uint64, error)
 	GetCodeFn                func(codeID wasmvm.Checksum) (wasmvm.WasmCode, error)
@@ -41,6 +43,10 @@ type MockWasmEngine struct {
 	IBCPacketTimeoutFn       func(codeID wasmvm.Checksum, env wasmvmtypes.Env, msg wasmvmtypes.IBCPacketTimeoutMsg, store wasmvm.KVStore, goapi wasmvm.GoAPI, querier wasmvm.Querier, gasMeter wasmvm.GasMeter, gasLimit uint64, deserCost wasmvmtypes.UFraction) (*wasmvmtypes.IBCBasicResult, uint64, error)
 	IBCSourceCallbackFn      func(codeID wasmvm.Checksum, env wasmvmtypes.Env, msg wasmvmtypes.IBCSourceCallbackMsg, store wasmvm.KVStore, goapi wasmvm.GoAPI, querier wasmvm.Querier, gasMeter wasmvm.GasMeter, gasLimit uint64, deserCost wasmvmtypes.UFraction) (*wasmvmtypes.IBCBasicResult, uint64, error)
 	IBCDestinationCallbackFn func(codeID wasmvm.Checksum, env wasmvmtypes.Env, msg wasmvmtypes.IBCDestinationCallbackMsg, store wasmvm.KVStore, goapi wasmvm.GoAPI, querier wasmvm.Querier, gasMeter wasmvm.GasMeter, gasLimit uint64, deserCost wasmvmtypes.UFraction) (*wasmvmtypes.IBCBasicResult, uint64, error)
+	IBC2PacketAckFn          func(codeID wasmvm.Checksum, env wasmvmtypes.Env, msg wasmvmtypes.IBC2AcknowledgeMsg, store wasmvm.KVStore, goapi wasmvm.GoAPI, querier wasmvm.Querier, gasMeter wasmvm.GasMeter, gasLimit uint64, deserCost wasmvmtypes.UFraction) (*wasmvmtypes.IBCBasicResult, uint64, error)
+	IBC2PacketReceiveFn      func(codeID wasmvm.Checksum, env wasmvmtypes.Env, msg wasmvmtypes.IBC2PacketReceiveMsg, store wasmvm.KVStore, goapi wasmvm.GoAPI, querier wasmvm.Querier, gasMeter wasmvm.GasMeter, gasLimit uint64, deserCost wasmvmtypes.UFraction) (*wasmvmtypes.IBCReceiveResult, uint64, error)
+	IBC2PacketTimeoutFn      func(codeID wasmvm.Checksum, env wasmvmtypes.Env, msg wasmvmtypes.IBC2PacketTimeoutMsg, store wasmvm.KVStore, goapi wasmvm.GoAPI, querier wasmvm.Querier, gasMeter wasmvm.GasMeter, gasLimit uint64, deserCost wasmvmtypes.UFraction) (*wasmvmtypes.IBCBasicResult, uint64, error)
+	IBC2PacketSendFn         func(codeID wasmvm.Checksum, env wasmvmtypes.Env, msg wasmvmtypes.IBC2PacketSendMsg, store wasmvm.KVStore, goapi wasmvm.GoAPI, querier wasmvm.Querier, gasMeter wasmvm.GasMeter, gasLimit uint64, deserCost wasmvmtypes.UFraction) (*wasmvmtypes.IBCBasicResult, uint64, error)
 	PinFn                    func(checksum wasmvm.Checksum) error
 	UnpinFn                  func(checksum wasmvm.Checksum) error
 	GetMetricsFn             func() (*wasmvmtypes.Metrics, error)
@@ -103,6 +109,34 @@ func (m MockWasmEngine) IBCDestinationCallback(codeID wasmvm.Checksum, env wasmv
 	return m.IBCDestinationCallbackFn(codeID, env, msg, store, goapi, querier, gasMeter, gasLimit, deserCost)
 }
 
+func (m *MockWasmEngine) IBC2PacketAck(codeID wasmvm.Checksum, env wasmvmtypes.Env, msg wasmvmtypes.IBC2AcknowledgeMsg, store wasmvm.KVStore, goapi wasmvm.GoAPI, querier wasmvm.Querier, gasMeter wasmvm.GasMeter, gasLimit uint64, deserCost wasmvmtypes.UFraction) (*wasmvmtypes.IBCBasicResult, uint64, error) {
+	if m.IBC2PacketAckFn == nil {
+		panic("not supposed to be called!")
+	}
+	return m.IBC2PacketAckFn(codeID, env, msg, store, goapi, querier, gasMeter, gasLimit, deserCost)
+}
+
+func (m *MockWasmEngine) IBC2PacketReceive(codeID wasmvm.Checksum, env wasmvmtypes.Env, msg wasmvmtypes.IBC2PacketReceiveMsg, store wasmvm.KVStore, goapi wasmvm.GoAPI, querier wasmvm.Querier, gasMeter wasmvm.GasMeter, gasLimit uint64, deserCost wasmvmtypes.UFraction) (*wasmvmtypes.IBCReceiveResult, uint64, error) {
+	if m.IBCPacketReceiveFn == nil {
+		panic("not supposed to be called!")
+	}
+	return m.IBC2PacketReceiveFn(codeID, env, msg, store, goapi, querier, gasMeter, gasLimit, deserCost)
+}
+
+func (m *MockWasmEngine) IBC2PacketTimeout(codeID wasmvm.Checksum, env wasmvmtypes.Env, msg wasmvmtypes.IBC2PacketTimeoutMsg, store wasmvm.KVStore, goapi wasmvm.GoAPI, querier wasmvm.Querier, gasMeter wasmvm.GasMeter, gasLimit uint64, deserCost wasmvmtypes.UFraction) (*wasmvmtypes.IBCBasicResult, uint64, error) {
+	if m.IBC2PacketTimeoutFn == nil {
+		panic("not supposed to be called!")
+	}
+	return m.IBC2PacketTimeoutFn(codeID, env, msg, store, goapi, querier, gasMeter, gasLimit, deserCost)
+}
+
+func (m *MockWasmEngine) IBC2PacketSend(codeID wasmvm.Checksum, env wasmvmtypes.Env, msg wasmvmtypes.IBC2PacketSendMsg, store wasmvm.KVStore, goapi wasmvm.GoAPI, querier wasmvm.Querier, gasMeter wasmvm.GasMeter, gasLimit uint64, deserCost wasmvmtypes.UFraction) (*wasmvmtypes.IBCBasicResult, uint64, error) {
+	if m.IBC2PacketSendFn == nil {
+		panic("not supposed to be called!")
+	}
+	return m.IBC2PacketSendFn(codeID, env, msg, store, goapi, querier, gasMeter, gasLimit, deserCost)
+}
+
 func (m *MockWasmEngine) StoreCode(codeID wasmvm.WasmCode, gasLimit uint64) (wasmvm.Checksum, uint64, error) {
 	if m.StoreCodeFn == nil {
 		panic("not supposed to be called!")
@@ -115,6 +149,13 @@ func (m *MockWasmEngine) StoreCodeUnchecked(codeID wasmvm.WasmCode) (wasmvm.Chec
 		panic("not supposed to be called!")
 	}
 	return m.StoreCodeUncheckedFn(codeID)
+}
+
+func (m *MockWasmEngine) SimulateStoreCode(codeID wasmvm.WasmCode, gasLimit uint64) (wasmvm.Checksum, uint64, error) {
+	if m.SimulateStoreCodeFn == nil {
+		panic("not supposed to be called!")
+	}
+	return m.SimulateStoreCodeFn(codeID, gasLimit)
 }
 
 func (m *MockWasmEngine) AnalyzeCode(codeID wasmvm.Checksum) (*wasmvmtypes.AnalysisReport, error) {
@@ -150,6 +191,13 @@ func (m *MockWasmEngine) Migrate(codeID wasmvm.Checksum, env wasmvmtypes.Env, mi
 		panic("not supposed to be called!")
 	}
 	return m.MigrateFn(codeID, env, migrateMsg, store, goapi, querier, gasMeter, gasLimit, deserCost)
+}
+
+func (m *MockWasmEngine) MigrateWithInfo(codeID wasmvm.Checksum, env wasmvmtypes.Env, migrateMsg []byte, migrateInfo wasmvmtypes.MigrateInfo, store wasmvm.KVStore, goapi wasmvm.GoAPI, querier wasmvm.Querier, gasMeter wasmvm.GasMeter, gasLimit uint64, deserCost wasmvmtypes.UFraction) (*wasmvmtypes.ContractResult, uint64, error) {
+	if m.MigrateFn == nil {
+		panic("not supposed to be called!")
+	}
+	return m.MigrateWithInfoFn(codeID, env, migrateMsg, migrateInfo, store, goapi, querier, gasMeter, gasLimit, deserCost)
 }
 
 func (m *MockWasmEngine) Sudo(codeID wasmvm.Checksum, env wasmvmtypes.Env, sudoMsg []byte, store wasmvm.KVStore, goapi wasmvm.GoAPI, querier wasmvm.Querier, gasMeter wasmvm.GasMeter, gasLimit uint64, deserCost wasmvmtypes.UFraction) (*wasmvmtypes.ContractResult, uint64, error) {

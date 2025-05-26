@@ -40,7 +40,6 @@ func (app *WasmApp) RegisterUpgradeHandlers() {
 		AccountKeeper:         &app.AccountKeeper,
 		ParamsKeeper:          &app.ParamsKeeper,
 		ConsensusParamsKeeper: &app.ConsensusParamsKeeper,
-		CapabilityKeeper:      app.CapabilityKeeper,
 		IBCKeeper:             app.IBCKeeper,
 		Codec:                 app.appCodec,
 		GetStoreKey:           app.GetKey,
@@ -70,7 +69,7 @@ func (app *WasmApp) RegisterUpgradeHandlers() {
 	// register store loader for current upgrade
 	for _, upgrade := range Upgrades {
 		if upgradeInfo.Name == upgrade.UpgradeName {
-			app.SetStoreLoader(upgradetypes.UpgradeStoreLoader(upgradeInfo.Height, &upgrade.StoreUpgrades)) // nolint:gosec
+			app.SetStoreLoader(upgradetypes.UpgradeStoreLoader(upgradeInfo.Height, &upgrade.StoreUpgrades))
 			break
 		}
 	}
@@ -78,8 +77,6 @@ func (app *WasmApp) RegisterUpgradeHandlers() {
 
 func setupLegacyKeyTables(k *paramskeeper.Keeper) {
 	for _, subspace := range k.GetSubspaces() {
-		subspace := subspace
-
 		var keyTable paramstypes.KeyTable
 		switch subspace.Name() {
 		case authtypes.ModuleName:

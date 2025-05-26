@@ -114,7 +114,7 @@ type InstantiateContractProposal struct {
 	Admin string `protobuf:"bytes,4,opt,name=admin,proto3" json:"admin,omitempty"`
 	// CodeID is the reference to the stored WASM code
 	CodeID uint64 `protobuf:"varint,5,opt,name=code_id,json=codeId,proto3" json:"code_id,omitempty"`
-	// Label is optional metadata to be stored with a constract instance.
+	// Label is optional metadata to be stored with a contract instance.
 	Label string `protobuf:"bytes,6,opt,name=label,proto3" json:"label,omitempty"`
 	// Msg json encoded message to be passed to the contract on instantiation
 	Msg RawContractMessage `protobuf:"bytes,7,opt,name=msg,proto3,casttype=RawContractMessage" json:"msg,omitempty"`
@@ -176,7 +176,7 @@ type InstantiateContract2Proposal struct {
 	Admin string `protobuf:"bytes,4,opt,name=admin,proto3" json:"admin,omitempty"`
 	// CodeID is the reference to the stored WASM code
 	CodeID uint64 `protobuf:"varint,5,opt,name=code_id,json=codeId,proto3" json:"code_id,omitempty"`
-	// Label is optional metadata to be stored with a constract instance.
+	// Label is optional metadata to be stored with a contract instance.
 	Label string `protobuf:"bytes,6,opt,name=label,proto3" json:"label,omitempty"`
 	// Msg json encode message to be passed to the contract on instantiation
 	Msg RawContractMessage `protobuf:"bytes,7,opt,name=msg,proto3,casttype=RawContractMessage" json:"msg,omitempty"`
@@ -661,7 +661,7 @@ type UpdateInstantiateConfigProposal struct {
 	Title string `protobuf:"bytes,1,opt,name=title,proto3" json:"title,omitempty" yaml:"title"`
 	// Description is a human readable text
 	Description string `protobuf:"bytes,2,opt,name=description,proto3" json:"description,omitempty" yaml:"description"`
-	// AccessConfigUpdate contains the list of code ids and the access config
+	// AccessConfigUpdates contains the list of code ids and the access config
 	// to be applied.
 	AccessConfigUpdates []AccessConfigUpdate `protobuf:"bytes,3,rep,name=access_config_updates,json=accessConfigUpdates,proto3" json:"access_config_updates"`
 }
@@ -724,7 +724,7 @@ type StoreAndInstantiateContractProposal struct {
 	UnpinCode bool `protobuf:"varint,6,opt,name=unpin_code,json=unpinCode,proto3" json:"unpin_code,omitempty"`
 	// Admin is an optional address that can execute migrations
 	Admin string `protobuf:"bytes,7,opt,name=admin,proto3" json:"admin,omitempty"`
-	// Label is optional metadata to be stored with a constract instance.
+	// Label is optional metadata to be stored with a contract instance.
 	Label string `protobuf:"bytes,8,opt,name=label,proto3" json:"label,omitempty"`
 	// Msg json encoded message to be passed to the contract on instantiation
 	Msg RawContractMessage `protobuf:"bytes,9,opt,name=msg,proto3,casttype=RawContractMessage" json:"msg,omitempty"`

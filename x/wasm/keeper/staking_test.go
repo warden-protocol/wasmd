@@ -5,7 +5,7 @@ import (
 	"os"
 	"testing"
 
-	wasmvmtypes "github.com/CosmWasm/wasmvm/v2/types"
+	wasmvmtypes "github.com/CosmWasm/wasmvm/v3/types"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
@@ -31,7 +31,7 @@ type StakingInitMsg struct {
 	Validator sdk.ValAddress    `json:"validator"`
 	ExitTax   sdkmath.LegacyDec `json:"exit_tax"`
 	// MinWithdrawal is uint128 encoded as a string (use math.Int?)
-	MinWithdrawl string `json:"min_withdrawal"`
+	MinWithdrawal string `json:"min_withdrawal"`
 }
 
 // StakingHandleMsg is used to encode handle messages
@@ -88,8 +88,8 @@ type InvestmentResponse struct {
 	Owner        sdk.AccAddress    `json:"owner"`
 	Validator    sdk.ValAddress    `json:"validator"`
 	ExitTax      sdkmath.LegacyDec `json:"exit_tax"`
-	// MinWithdrawl is uint128 encoded as a string (use math.Int?)
-	MinWithdrawl string `json:"min_withdrawal"`
+	// MinWithdrawal is uint128 encoded as a string (use math.Int?)
+	MinWithdrawal string `json:"min_withdrawal"`
 }
 
 func TestInitializeStaking(t *testing.T) {
@@ -105,7 +105,7 @@ func TestInitializeStaking(t *testing.T) {
 	deposit := sdk.NewCoins(sdk.NewInt64Coin("denom", 100000), sdk.NewInt64Coin("stake", 500000))
 	creator := k.Faucet.NewFundedRandomAccount(ctx, deposit...)
 
-	// upload staking derivates code
+	// upload staking derivative code
 	stakingCode, err := os.ReadFile("./testdata/staking.wasm")
 	require.NoError(t, err)
 	stakingID, _, err := keeper.Create(ctx, creator, stakingCode, nil)
@@ -114,17 +114,17 @@ func TestInitializeStaking(t *testing.T) {
 
 	// register to a valid address
 	initMsg := StakingInitMsg{
-		Name:         "Staking Derivatives",
-		Symbol:       "DRV",
-		Decimals:     0,
-		Validator:    valAddr,
-		ExitTax:      sdkmath.LegacyMustNewDecFromStr("0.10"),
-		MinWithdrawl: "100",
+		Name:          "Staking Derivatives",
+		Symbol:        "DRV",
+		Decimals:      0,
+		Validator:     valAddr,
+		ExitTax:       sdkmath.LegacyMustNewDecFromStr("0.10"),
+		MinWithdrawal: "100",
 	}
 	initBz, err := json.Marshal(&initMsg)
 	require.NoError(t, err)
 
-	stakingAddr, _, err := k.ContractKeeper.Instantiate(ctx, stakingID, creator, nil, initBz, "staking derivates - DRV", nil)
+	stakingAddr, _, err := k.ContractKeeper.Instantiate(ctx, stakingID, creator, nil, initBz, "staking derivative - DRV", nil)
 	require.NoError(t, err)
 	require.NotEmpty(t, stakingAddr)
 
@@ -134,12 +134,12 @@ func TestInitializeStaking(t *testing.T) {
 	// try to register with a validator not on the list and it fails
 	_, bob := keyPubAddr()
 	badInitMsg := StakingInitMsg{
-		Name:         "Missing Validator",
-		Symbol:       "MISS",
-		Decimals:     0,
-		Validator:    sdk.ValAddress(bob),
-		ExitTax:      sdkmath.LegacyMustNewDecFromStr("0.10"),
-		MinWithdrawl: "100",
+		Name:          "Missing Validator",
+		Symbol:        "MISS",
+		Decimals:      0,
+		Validator:     sdk.ValAddress(bob),
+		ExitTax:       sdkmath.LegacyMustNewDecFromStr("0.10"),
+		MinWithdrawal: "100",
 	}
 	badBz, err := json.Marshal(&badInitMsg)
 	require.NoError(t, err)
@@ -182,7 +182,7 @@ func initializeStaking(t *testing.T) initInfo {
 	deposit := sdk.NewCoins(sdk.NewInt64Coin("denom", 100000), sdk.NewInt64Coin("stake", 500000))
 	creator := k.Faucet.NewFundedRandomAccount(ctx, deposit...)
 
-	// upload staking derivates code
+	// upload staking derivative code
 	stakingCode, err := os.ReadFile("./testdata/staking.wasm")
 	require.NoError(t, err)
 	stakingID, _, err := k.ContractKeeper.Create(ctx, creator, stakingCode, nil)
@@ -191,17 +191,17 @@ func initializeStaking(t *testing.T) initInfo {
 
 	// register to a valid address
 	initMsg := StakingInitMsg{
-		Name:         "Staking Derivatives",
-		Symbol:       "DRV",
-		Decimals:     0,
-		Validator:    valAddr,
-		ExitTax:      sdkmath.LegacyMustNewDecFromStr("0.10"),
-		MinWithdrawl: "100",
+		Name:          "Staking Derivatives",
+		Symbol:        "DRV",
+		Decimals:      0,
+		Validator:     valAddr,
+		ExitTax:       sdkmath.LegacyMustNewDecFromStr("0.10"),
+		MinWithdrawal: "100",
 	}
 	initBz, err := json.Marshal(&initMsg)
 	require.NoError(t, err)
 
-	stakingAddr, _, err := k.ContractKeeper.Instantiate(ctx, stakingID, creator, nil, initBz, "staking derivates - DRV", nil)
+	stakingAddr, _, err := k.ContractKeeper.Instantiate(ctx, stakingID, creator, nil, initBz, "staking derivative - DRV", nil)
 	require.NoError(t, err)
 	require.NotEmpty(t, stakingAddr)
 

@@ -3,11 +3,13 @@ package keeper
 import (
 	"encoding/json"
 	"fmt"
+	"time"
 
-	wasmvmtypes "github.com/CosmWasm/wasmvm/v2/types"
-	ibctransfertypes "github.com/cosmos/ibc-go/v8/modules/apps/transfer/types"
-	ibcclienttypes "github.com/cosmos/ibc-go/v8/modules/core/02-client/types"
-	channeltypes "github.com/cosmos/ibc-go/v8/modules/core/04-channel/types"
+	wasmvmtypes "github.com/CosmWasm/wasmvm/v3/types"
+	ibctransfertypes "github.com/cosmos/ibc-go/v10/modules/apps/transfer/types"
+	ibcclienttypes "github.com/cosmos/ibc-go/v10/modules/core/02-client/types"
+	channeltypes "github.com/cosmos/ibc-go/v10/modules/core/04-channel/types"
+	channeltypesv2 "github.com/cosmos/ibc-go/v10/modules/core/04-channel/v2/types"
 
 	errorsmod "cosmossdk.io/errors"
 	sdkmath "cosmossdk.io/math"
@@ -23,14 +25,19 @@ import (
 	"github.com/CosmWasm/wasmd/x/wasm/types"
 )
 
+// anyMsgGasCost is the gas cost for unpacking an AnyMsg, in CosmWasm gas units (not SDK gas units).
+// With the default gas multiplier, this amounts to 5 SDK gas.
+const anyMsgGasCost = 700000
+
 type (
 	BankEncoder         func(sender sdk.AccAddress, msg *wasmvmtypes.BankMsg) ([]sdk.Msg, error)
 	CustomEncoder       func(sender sdk.AccAddress, msg json.RawMessage) ([]sdk.Msg, error)
 	DistributionEncoder func(sender sdk.AccAddress, msg *wasmvmtypes.DistributionMsg) ([]sdk.Msg, error)
 	StakingEncoder      func(sender sdk.AccAddress, msg *wasmvmtypes.StakingMsg) ([]sdk.Msg, error)
-	AnyEncoder          func(sender sdk.AccAddress, msg *wasmvmtypes.AnyMsg) ([]sdk.Msg, error)
+	AnyEncoder          func(ctx sdk.Context, sender sdk.AccAddress, msg *wasmvmtypes.AnyMsg) ([]sdk.Msg, error)
 	WasmEncoder         func(sender sdk.AccAddress, msg *wasmvmtypes.WasmMsg) ([]sdk.Msg, error)
 	IBCEncoder          func(ctx sdk.Context, sender sdk.AccAddress, contractIBCPortID string, msg *wasmvmtypes.IBCMsg) ([]sdk.Msg, error)
+	IBC2Encoder         func(sender sdk.AccAddress, msg *wasmvmtypes.IBC2Msg) ([]sdk.Msg, error)
 )
 
 type MessageEncoders struct {
@@ -38,8 +45,9 @@ type MessageEncoders struct {
 	Custom       func(sender sdk.AccAddress, msg json.RawMessage) ([]sdk.Msg, error)
 	Distribution func(sender sdk.AccAddress, msg *wasmvmtypes.DistributionMsg) ([]sdk.Msg, error)
 	IBC          func(ctx sdk.Context, sender sdk.AccAddress, contractIBCPortID string, msg *wasmvmtypes.IBCMsg) ([]sdk.Msg, error)
+	IBC2         func(sender sdk.AccAddress, msg *wasmvmtypes.IBC2Msg) ([]sdk.Msg, error)
 	Staking      func(sender sdk.AccAddress, msg *wasmvmtypes.StakingMsg) ([]sdk.Msg, error)
-	Any          func(sender sdk.AccAddress, msg *wasmvmtypes.AnyMsg) ([]sdk.Msg, error)
+	Any          func(ctx sdk.Context, sender sdk.AccAddress, msg *wasmvmtypes.AnyMsg) ([]sdk.Msg, error)
 	Wasm         func(sender sdk.AccAddress, msg *wasmvmtypes.WasmMsg) ([]sdk.Msg, error)
 	Gov          func(sender sdk.AccAddress, msg *wasmvmtypes.GovMsg) ([]sdk.Msg, error)
 }
@@ -50,6 +58,7 @@ func DefaultEncoders(unpacker codectypes.AnyUnpacker, portSource types.ICS20Tran
 		Custom:       NoCustomMsg,
 		Distribution: EncodeDistributionMsg,
 		IBC:          EncodeIBCMsg(portSource),
+		IBC2:         EncodeIBCv2Msg,
 		Staking:      EncodeStakingMsg,
 		Any:          EncodeAnyMsg(unpacker),
 		Wasm:         EncodeWasmMsg,
@@ -72,6 +81,9 @@ func (e MessageEncoders) Merge(o *MessageEncoders) MessageEncoders {
 	}
 	if o.IBC != nil {
 		e.IBC = o.IBC
+	}
+	if o.IBC2 != nil {
+		e.IBC2 = o.IBC2
 	}
 	if o.Staking != nil {
 		e.Staking = o.Staking
@@ -98,10 +110,12 @@ func (e MessageEncoders) Encode(ctx sdk.Context, contractAddr sdk.AccAddress, co
 		return e.Distribution(contractAddr, msg.Distribution)
 	case msg.IBC != nil:
 		return e.IBC(ctx, contractAddr, contractIBCPortID, msg.IBC)
+	case msg.IBC2 != nil:
+		return e.IBC2(contractAddr, msg.IBC2)
 	case msg.Staking != nil:
 		return e.Staking(contractAddr, msg.Staking)
 	case msg.Any != nil:
-		return e.Any(contractAddr, msg.Any)
+		return e.Any(ctx, contractAddr, msg.Any)
 	case msg.Wasm != nil:
 		return e.Wasm(contractAddr, msg.Wasm)
 	case msg.Gov != nil:
@@ -205,12 +219,14 @@ func EncodeStakingMsg(sender sdk.AccAddress, msg *wasmvmtypes.StakingMsg) ([]sdk
 }
 
 func EncodeAnyMsg(unpacker codectypes.AnyUnpacker) AnyEncoder {
-	return func(sender sdk.AccAddress, msg *wasmvmtypes.AnyMsg) ([]sdk.Msg, error) {
+	return func(ctx sdk.Context, sender sdk.AccAddress, msg *wasmvmtypes.AnyMsg) ([]sdk.Msg, error) {
 		codecAny := codectypes.Any{
 			TypeUrl: msg.TypeURL,
 			Value:   msg.Value,
 		}
 		var sdkMsg sdk.Msg
+
+		ctx.GasMeter().ConsumeGas(anyMsgGasCost/types.DefaultGasMultiplier, "unpacking AnyMsg")
 		if err := unpacker.UnpackAny(&codecAny, &sdkMsg); err != nil {
 			return nil, errorsmod.Wrap(types.ErrInvalidMsg, fmt.Sprintf("Cannot unpack proto message with type URL: %s", msg.TypeURL))
 		}
@@ -323,6 +339,31 @@ func EncodeIBCMsg(portSource types.ICS20TransferPortSource) func(ctx sdk.Context
 		default:
 			return nil, errorsmod.Wrap(types.ErrUnknownMsg, "unknown variant of IBC")
 		}
+	}
+}
+
+func EncodeIBCv2Msg(sender sdk.AccAddress, msg *wasmvmtypes.IBC2Msg) ([]sdk.Msg, error) {
+	switch {
+	case msg.SendPacket != nil:
+		var payloads []channeltypesv2.Payload
+		for _, payload := range msg.SendPacket.Payloads {
+			payloads = append(payloads, channeltypesv2.Payload{
+				SourcePort:      payload.SourcePort,
+				DestinationPort: payload.DestinationPort,
+				Version:         payload.Version,
+				Encoding:        payload.Encoding,
+				Value:           payload.Value,
+			})
+		}
+		msg := &channeltypesv2.MsgSendPacket{
+			SourceClient:     msg.SendPacket.SourceClient,
+			TimeoutTimestamp: uint64(time.Unix(0, int64(msg.SendPacket.Timeout)).Unix()),
+			Payloads:         payloads,
+			Signer:           sender.String(),
+		}
+		return []sdk.Msg{msg}, nil
+	default:
+		return nil, errorsmod.Wrap(types.ErrUnknownMsg, "unknown variant of IBCv2")
 	}
 }
 

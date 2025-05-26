@@ -6,7 +6,7 @@ import (
 	"reflect"
 	"testing"
 
-	wasmvmtypes "github.com/CosmWasm/wasmvm/v2/types"
+	wasmvmtypes "github.com/CosmWasm/wasmvm/v3/types"
 	abci "github.com/cometbft/cometbft/abci/types"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -333,7 +333,7 @@ func TestDispatchSubmessages(t *testing.T) {
 				DispatchMsgFn: func(ctx sdk.Context, contractAddr sdk.AccAddress, contractIBCPortID string, msg wasmvmtypes.CosmosMsg) (events []sdk.Event, data [][]byte, msgResponses [][]*codectypes.Any, err error) {
 					events = []sdk.Event{
 						sdk.NewEvent("message", sdk.NewAttribute("_contract_address", contractAddr.String())),
-						// we don't know what the contarctAddr will be so we can't use it in the final tests
+						// we don't know what the contractAddr will be so we can't use it in the final tests
 						sdk.NewEvent("execute", sdk.NewAttribute("_contract_address", "placeholder-random-addr")),
 						sdk.NewEvent("wasm", sdk.NewAttribute("random", "data")),
 					}
@@ -402,7 +402,7 @@ func TestDispatchSubmessages(t *testing.T) {
 						// this is filtered out
 						sdk.NewEvent("message", sdk.NewAttribute("stargate", "something-something")),
 						// we still emit this to the client, but not the contract
-						sdk.NewEvent("non-determinstic"),
+						sdk.NewEvent("non-deterministic"),
 					}
 					return events, [][]byte{[]byte("subData")}, [][]*codectypes.Any{}, nil
 				},
@@ -410,7 +410,7 @@ func TestDispatchSubmessages(t *testing.T) {
 			expData:    []byte("subData"),
 			expCommits: []bool{true},
 			expEvents: []sdk.Event{
-				sdk.NewEvent("non-determinstic"),
+				sdk.NewEvent("non-deterministic"),
 				// the event from reply is also exposed
 				sdk.NewEvent("stargate-reply"),
 			},

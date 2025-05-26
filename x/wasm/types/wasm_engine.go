@@ -1,8 +1,8 @@
 package types
 
 import (
-	wasmvm "github.com/CosmWasm/wasmvm/v2"
-	wasmvmtypes "github.com/CosmWasm/wasmvm/v2/types"
+	wasmvm "github.com/CosmWasm/wasmvm/v3"
+	wasmvmtypes "github.com/CosmWasm/wasmvm/v3/types"
 
 	storetypes "cosmossdk.io/store/types"
 )
@@ -29,6 +29,11 @@ type WasmEngine interface {
 	// It does the same as StoreCode but without the static checks.
 	// Use this for adding code that was checked before, particularly in the case of state sync.
 	StoreCodeUnchecked(code wasmvm.WasmCode) (wasmvm.Checksum, error)
+
+	// SimulateStoreCode works like StoreCode, but does not actually store the code.
+	// Instead, it just does all the validation and compilation steps without storing the result on disk.
+	// Returns both the checksum, as well as the gas cost of compilation (in CosmWasm Gas) or an error.
+	SimulateStoreCode(code wasmvm.WasmCode, gasLimit uint64) (wasmvm.Checksum, uint64, error)
 
 	// AnalyzeCode will statically analyze the code.
 	// Currently just reports if it exposes all IBC entry points.
@@ -107,10 +112,32 @@ type WasmEngine interface {
 		deserCost wasmvmtypes.UFraction,
 	) (*wasmvmtypes.ContractResult, uint64, error)
 
+	// MigrateWithInfo will migrate an existing contract to a new code binary.
+	// This takes storage of the data from the original contract and the CodeID of the new contract that should
+	// replace it. This allows it to run a migration step if needed, or return an error if unable to migrate
+	// the given data.
+	//
+	// MigrateMsg has some data on how to perform the migration.
+	//
+	// MigrateWithInfo takes one more argument - `migateInfo`. It consist of an additional data
+	// related to the on-chain current contract's state version.
+	MigrateWithInfo(
+		checksum wasmvm.Checksum,
+		env wasmvmtypes.Env,
+		migrateMsg []byte,
+		migrateInfo wasmvmtypes.MigrateInfo,
+		store wasmvm.KVStore,
+		goapi wasmvm.GoAPI,
+		querier wasmvm.Querier,
+		gasMeter wasmvm.GasMeter,
+		gasLimit uint64,
+		deserCost wasmvmtypes.UFraction,
+	) (*wasmvmtypes.ContractResult, uint64, error)
+
 	// Sudo runs an existing contract in read/write mode (like Execute), but is never exposed to external callers
 	// (either transactions or government proposals), but can only be called by other native Go modules directly.
 	//
-	// This allows a contract to expose custom "super user" functions or priviledged operations that can be
+	// This allows a contract to expose custom "super user" functions or privileged operations that can be
 	// deeply integrated with native modules.
 	Sudo(
 		checksum wasmvm.Checksum,
@@ -154,7 +181,7 @@ type WasmEngine interface {
 	IBCChannelOpen(
 		checksum wasmvm.Checksum,
 		env wasmvmtypes.Env,
-		channel wasmvmtypes.IBCChannelOpenMsg,
+		msg wasmvmtypes.IBCChannelOpenMsg,
 		store wasmvm.KVStore,
 		goapi wasmvm.GoAPI,
 		querier wasmvm.Querier,
@@ -168,7 +195,7 @@ type WasmEngine interface {
 	IBCChannelConnect(
 		checksum wasmvm.Checksum,
 		env wasmvmtypes.Env,
-		channel wasmvmtypes.IBCChannelConnectMsg,
+		msg wasmvmtypes.IBCChannelConnectMsg,
 		store wasmvm.KVStore,
 		goapi wasmvm.GoAPI,
 		querier wasmvm.Querier,
@@ -182,7 +209,7 @@ type WasmEngine interface {
 	IBCChannelClose(
 		checksum wasmvm.Checksum,
 		env wasmvmtypes.Env,
-		channel wasmvmtypes.IBCChannelCloseMsg,
+		msg wasmvmtypes.IBCChannelCloseMsg,
 		store wasmvm.KVStore,
 		goapi wasmvm.GoAPI,
 		querier wasmvm.Querier,
@@ -196,7 +223,7 @@ type WasmEngine interface {
 	IBCPacketReceive(
 		checksum wasmvm.Checksum,
 		env wasmvmtypes.Env,
-		packet wasmvmtypes.IBCPacketReceiveMsg,
+		msg wasmvmtypes.IBCPacketReceiveMsg,
 		store wasmvm.KVStore,
 		goapi wasmvm.GoAPI,
 		querier wasmvm.Querier,
@@ -211,7 +238,7 @@ type WasmEngine interface {
 	IBCPacketAck(
 		checksum wasmvm.Checksum,
 		env wasmvmtypes.Env,
-		ack wasmvmtypes.IBCPacketAckMsg,
+		msg wasmvmtypes.IBCPacketAckMsg,
 		store wasmvm.KVStore,
 		goapi wasmvm.GoAPI,
 		querier wasmvm.Querier,
@@ -226,7 +253,7 @@ type WasmEngine interface {
 	IBCPacketTimeout(
 		checksum wasmvm.Checksum,
 		env wasmvmtypes.Env,
-		packet wasmvmtypes.IBCPacketTimeoutMsg,
+		msg wasmvmtypes.IBCPacketTimeoutMsg,
 		store wasmvm.KVStore,
 		goapi wasmvm.GoAPI,
 		querier wasmvm.Querier,
@@ -250,13 +277,67 @@ type WasmEngine interface {
 		deserCost wasmvmtypes.UFraction,
 	) (*wasmvmtypes.IBCBasicResult, uint64, error)
 
-	// IBCSourceCallback is available on IBC-callbacks-enabled contracts and is called when an
-	// IBC-callbacks-enabled IBC message previously sent by this contract is either acknowledged or
-	// times out.
+	// IBCDestinationCallback is available on IBC-callbacks-enabled contracts and is called when an
+	// IBC-callbacks-enabled IBC message previously sent from a different chain is being
+	// acknowledged on this chain.
 	IBCDestinationCallback(
 		checksum wasmvm.Checksum,
 		env wasmvmtypes.Env,
 		msg wasmvmtypes.IBCDestinationCallbackMsg,
+		store wasmvm.KVStore,
+		goapi wasmvm.GoAPI,
+		querier wasmvm.Querier,
+		gasMeter wasmvm.GasMeter,
+		gasLimit uint64,
+		deserCost wasmvmtypes.UFraction,
+	) (*wasmvmtypes.IBCBasicResult, uint64, error)
+
+	IBC2PacketAck(
+		checksum wasmvm.Checksum,
+		env wasmvmtypes.Env,
+		payload wasmvmtypes.IBC2AcknowledgeMsg,
+		store wasmvm.KVStore,
+		goapi wasmvm.GoAPI,
+		querier wasmvm.Querier,
+		gasMeter wasmvm.GasMeter,
+		gasLimit uint64,
+		deserCost wasmvmtypes.UFraction,
+	) (*wasmvmtypes.IBCBasicResult, uint64, error)
+
+	// IBC2PacketReceive is available on IBC2-enabled contracts and is called when an incoming
+	// payload is received on a channel belonging to this contract
+	IBC2PacketReceive(
+		checksum wasmvm.Checksum,
+		env wasmvmtypes.Env,
+		payload wasmvmtypes.IBC2PacketReceiveMsg,
+		store wasmvm.KVStore,
+		goapi wasmvm.GoAPI,
+		querier wasmvm.Querier,
+		gasMeter wasmvm.GasMeter,
+		gasLimit uint64,
+		deserCost wasmvmtypes.UFraction,
+	) (*wasmvmtypes.IBCReceiveResult, uint64, error)
+
+	// IBC2PacketTimeout is available on IBCv2-enabled contracts and is called when an
+	// outgoing packet (previously sent by this contract) will probably never be executed.
+	IBC2PacketTimeout(
+		checksum wasmvm.Checksum,
+		env wasmvmtypes.Env,
+		packet wasmvmtypes.IBC2PacketTimeoutMsg,
+		store wasmvm.KVStore,
+		goapi wasmvm.GoAPI,
+		querier wasmvm.Querier,
+		gasMeter wasmvm.GasMeter,
+		gasLimit uint64,
+		deserCost wasmvmtypes.UFraction,
+	) (*wasmvmtypes.IBCBasicResult, uint64, error)
+
+	// IBC2PacketSend is available on IBCv2-enabled contracts and is called to verify an
+	// outgoing packet before it is sent to another blockchain.
+	IBC2PacketSend(
+		checksum wasmvm.Checksum,
+		env wasmvmtypes.Env,
+		packet wasmvmtypes.IBC2PacketSendMsg,
 		store wasmvm.KVStore,
 		goapi wasmvm.GoAPI,
 		querier wasmvm.Querier,

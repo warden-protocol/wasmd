@@ -12,9 +12,10 @@ import (
 	"strings"
 	"time"
 
-	wasmvm "github.com/CosmWasm/wasmvm/v2"
-	wasmvmtypes "github.com/CosmWasm/wasmvm/v2/types"
-	channeltypes "github.com/cosmos/ibc-go/v8/modules/core/04-channel/types"
+	wasmvm "github.com/CosmWasm/wasmvm/v3"
+	wasmvmtypes "github.com/CosmWasm/wasmvm/v3/types"
+	channeltypes "github.com/cosmos/ibc-go/v10/modules/core/04-channel/types"
+	ibcapi "github.com/cosmos/ibc-go/v10/modules/core/api"
 
 	"cosmossdk.io/collections"
 	corestoretypes "cosmossdk.io/core/store"
@@ -89,8 +90,6 @@ type Keeper struct {
 	cdc                   codec.Codec
 	accountKeeper         types.AccountKeeper
 	bank                  CoinTransferrer
-	portKeeper            types.PortKeeper
-	capabilityKeeper      types.CapabilityKeeper
 	wasmVM                types.WasmEngine
 	wasmVMQueryHandler    WasmVMQueryHandler
 	wasmVMResponseHandler WasmVMResponseHandler
@@ -109,6 +108,15 @@ type Keeper struct {
 	// the address capable of executing a MsgUpdateParams message. Typically, this
 	// should be the x/gov module account.
 	authority string
+
+	// wasmLimits contains the limits sent to wasmvm on init
+	wasmLimits wasmvmtypes.WasmLimits
+
+	ibcRouterV2 *ibcapi.Router
+}
+
+func (k Keeper) GetIBCRouterV2() *ibcapi.Router {
+	return k.ibcRouterV2
 }
 
 func (k Keeper) getUploadAccessConfig(ctx context.Context) types.AccessConfig {
@@ -117,6 +125,10 @@ func (k Keeper) getUploadAccessConfig(ctx context.Context) types.AccessConfig {
 
 func (k Keeper) getInstantiateAccessConfig(ctx context.Context) types.AccessType {
 	return k.GetParams(ctx).InstantiateDefaultPermission
+}
+
+func (k Keeper) GetWasmLimits() wasmvmtypes.WasmLimits {
+	return k.wasmLimits
 }
 
 // GetParams returns the total set of wasm parameters.
@@ -171,17 +183,29 @@ func (k Keeper) create(ctx context.Context, creator sdk.AccAddress, wasmCode []b
 	}
 
 	gasLeft := k.runtimeGasForContract(sdkCtx)
-	checksum, gasUsed, err := k.wasmVM.StoreCode(wasmCode, gasLeft)
+	var gasUsed uint64
+	isSimulation := sdkCtx.ExecMode() == sdk.ExecModeSimulate
+	if isSimulation {
+		// only simulate storing the code, no files are written
+		checksum, gasUsed, err = k.wasmVM.SimulateStoreCode(wasmCode, gasLeft)
+	} else {
+		checksum, gasUsed, err = k.wasmVM.StoreCode(wasmCode, gasLeft)
+	}
 	k.consumeRuntimeGas(sdkCtx, gasUsed)
 	if err != nil {
 		return 0, checksum, errorsmod.Wrap(types.ErrCreateFailed, err.Error())
 	}
-	report, err := k.wasmVM.AnalyzeCode(checksum)
-	if err != nil {
-		return 0, checksum, errorsmod.Wrap(types.ErrCreateFailed, err.Error())
+	// simulation gets default value for capabilities
+	var requiredCapabilities string
+	if !isSimulation {
+		report, err := k.wasmVM.AnalyzeCode(checksum)
+		if err != nil {
+			return 0, checksum, errorsmod.Wrap(types.ErrCreateFailed, err.Error())
+		}
+		requiredCapabilities = report.RequiredCapabilities
 	}
 	codeID = k.mustAutoIncrementID(sdkCtx, types.KeySequenceCodeID)
-	k.Logger(sdkCtx).Debug("storing new contract", "capabilities", report.RequiredCapabilities, "code_id", codeID)
+	k.Logger(sdkCtx).Debug("storing new contract", "capabilities", requiredCapabilities, "code_id", codeID)
 	codeInfo := types.NewCodeInfo(checksum, creator, *instantiateAccess)
 	k.mustStoreCodeInfo(sdkCtx, codeID, codeInfo)
 
@@ -190,7 +214,7 @@ func (k Keeper) create(ctx context.Context, creator sdk.AccAddress, wasmCode []b
 		sdk.NewAttribute(types.AttributeKeyChecksum, hex.EncodeToString(checksum)),
 		sdk.NewAttribute(types.AttributeKeyCodeID, strconv.FormatUint(codeID, 10)), // last element to be compatible with scripts
 	)
-	for _, f := range strings.Split(report.RequiredCapabilities, ",") {
+	for _, f := range strings.Split(requiredCapabilities, ",") {
 		evt.AppendAttributes(sdk.NewAttribute(types.AttributeKeyRequiredCapability, strings.TrimSpace(f)))
 	}
 	sdkCtx.EventManager().EmitEvent(evt)
@@ -252,13 +276,17 @@ func (k Keeper) instantiate(
 		return nil, nil, types.ErrEmpty.Wrap("creator")
 	}
 	sdkCtx := sdk.UnwrapSDKContext(ctx)
-	setupCost := k.gasRegister.SetupContractCost(k.IsPinnedCode(sdkCtx, codeID), len(initMsg))
-	sdkCtx.GasMeter().ConsumeGas(setupCost, "Loading CosmWasm module: instantiate")
 
 	codeInfo := k.GetCodeInfo(ctx, codeID)
 	if codeInfo == nil {
 		return nil, nil, types.ErrNoSuchCodeFn(codeID).Wrapf("code id %d", codeID)
 	}
+
+	sdkCtx, discount := k.checkDiscountEligibility(sdkCtx, codeInfo.CodeHash, k.IsPinnedCode(sdkCtx, codeID))
+	setupCost := k.gasRegister.SetupContractCost(discount, len(initMsg))
+
+	sdkCtx.GasMeter().ConsumeGas(setupCost, "Loading CosmWasm module: instantiate")
+
 	if !authPolicy.CanInstantiateContract(codeInfo.InstantiateConfig, creator) {
 		return nil, nil, errorsmod.Wrap(sdkerrors.ErrUnauthorized, "can not instantiate")
 	}
@@ -347,11 +375,16 @@ func (k Keeper) instantiate(
 	}
 	if report.HasIBCEntryPoints {
 		// register IBC port
-		ibcPort, err := k.ensureIbcPort(sdkCtx, contractAddress)
-		if err != nil {
-			return nil, nil, err
-		}
+		ibcPort := PortIDForContract(contractAddress)
 		contractInfo.IBCPortID = ibcPort
+	}
+
+	ibc2Port := PortIDForContractV2(contractAddress)
+	contractInfo.IBC2PortID = ibc2Port
+
+	// TODO: Remove AddRoute in https://github.com/CosmWasm/wasmd/issues/2144
+	if !k.ibcRouterV2.HasRoute(ibc2Port) {
+		k.ibcRouterV2.AddRoute(ibc2Port, NewIBC2Handler(k))
 	}
 
 	// store contract before dispatch so that contract could be called back
@@ -395,7 +428,9 @@ func (k Keeper) execute(ctx context.Context, contractAddress, caller sdk.AccAddr
 		return nil, err
 	}
 
-	setupCost := k.gasRegister.SetupContractCost(k.IsPinnedCode(ctx, contractInfo.CodeID), len(msg))
+	sdkCtx, discount := k.checkDiscountEligibility(sdkCtx, codeInfo.CodeHash, k.IsPinnedCode(ctx, contractInfo.CodeID))
+	setupCost := k.gasRegister.SetupContractCost(discount, len(msg))
+
 	sdkCtx.GasMeter().ConsumeGas(setupCost, "Loading CosmWasm module: execute")
 
 	// add more funds
@@ -476,12 +511,12 @@ func (k Keeper) migrate(
 		return nil, errorsmod.Wrap(types.ErrMigrationFailed, "requires ibc callbacks")
 	case report.HasIBCEntryPoints && contractInfo.IBCPortID == "":
 		// add ibc port
-		ibcPort, err := k.ensureIbcPort(sdkCtx, contractAddress)
-		if err != nil {
-			return nil, err
-		}
+		ibcPort := PortIDForContract(contractAddress)
 		contractInfo.IBCPortID = ibcPort
 	}
+
+	ibc2Port := PortIDForContractV2(contractAddress)
+	contractInfo.IBC2PortID = ibc2Port
 
 	var response *wasmvmtypes.Response
 
@@ -496,7 +531,7 @@ func (k Keeper) migrate(
 	if report.ContractMigrateVersion == nil ||
 		oldReport.ContractMigrateVersion == nil ||
 		*report.ContractMigrateVersion != *oldReport.ContractMigrateVersion {
-		response, err = k.callMigrateEntrypoint(sdkCtx, contractAddress, wasmvmtypes.Checksum(newCodeInfo.CodeHash), msg, newCodeID)
+		response, err = k.callMigrateEntrypoint(sdkCtx, contractAddress, wasmvmtypes.Checksum(newCodeInfo.CodeHash), msg, newCodeID, caller, oldReport.ContractMigrateVersion)
 		if err != nil {
 			return nil, err
 		}
@@ -554,8 +589,11 @@ func (k Keeper) callMigrateEntrypoint(
 	newChecksum wasmvmtypes.Checksum,
 	msg []byte,
 	newCodeID uint64,
+	senderAddress sdk.AccAddress,
+	oldMigrateVersion *uint64,
 ) (*wasmvmtypes.Response, error) {
-	setupCost := k.gasRegister.SetupContractCost(k.IsPinnedCode(sdkCtx, newCodeID), len(msg))
+	sdkCtx, discount := k.checkDiscountEligibility(sdkCtx, newChecksum, k.IsPinnedCode(sdkCtx, newCodeID))
+	setupCost := k.gasRegister.SetupContractCost(discount, len(msg))
 	sdkCtx.GasMeter().ConsumeGas(setupCost, "Loading CosmWasm module: migrate")
 
 	env := types.NewEnv(sdkCtx, contractAddress)
@@ -566,7 +604,13 @@ func (k Keeper) callMigrateEntrypoint(
 	prefixStoreKey := types.GetContractStorePrefix(contractAddress)
 	vmStore := types.NewStoreAdapter(prefix.NewStore(runtime.KVStoreAdapter(k.storeService.OpenKVStore(sdkCtx)), prefixStoreKey))
 	gasLeft := k.runtimeGasForContract(sdkCtx)
-	res, gasUsed, err := k.wasmVM.Migrate(newChecksum, env, msg, vmStore, cosmwasmAPI, &querier, k.gasMeter(sdkCtx), gasLeft, costJSONDeserialization)
+
+	migrateInfo := wasmvmtypes.MigrateInfo{
+		Sender:            senderAddress.String(),
+		OldMigrateVersion: oldMigrateVersion,
+	}
+	res, gasUsed, err := k.wasmVM.MigrateWithInfo(newChecksum, env, msg, migrateInfo, vmStore, cosmwasmAPI, &querier, k.gasMeter(sdkCtx), gasLeft, costJSONDeserialization)
+
 	k.consumeRuntimeGas(sdkCtx, gasUsed)
 	if err != nil {
 		return nil, errorsmod.Wrap(types.ErrVMError, err.Error())
@@ -596,9 +640,10 @@ func (k Keeper) Sudo(ctx context.Context, contractAddress sdk.AccAddress, msg []
 	if err != nil {
 		return nil, err
 	}
-
-	setupCost := k.gasRegister.SetupContractCost(k.IsPinnedCode(ctx, contractInfo.CodeID), len(msg))
 	sdkCtx := sdk.UnwrapSDKContext(ctx)
+	sdkCtx, discount := k.checkDiscountEligibility(sdkCtx, codeInfo.CodeHash, k.IsPinnedCode(ctx, contractInfo.CodeID))
+	setupCost := k.gasRegister.SetupContractCost(discount, len(msg))
+
 	sdkCtx.GasMeter().ConsumeGas(setupCost, "Loading CosmWasm module: sudo")
 
 	env := types.NewEnv(sdkCtx, contractAddress)
@@ -640,7 +685,6 @@ func (k Keeper) reply(ctx sdk.Context, contractAddress sdk.AccAddress, reply was
 		return nil, err
 	}
 
-	// always consider this pinned
 	replyCosts := k.gasRegister.ReplyCosts(true, reply)
 	ctx.GasMeter().ConsumeGas(replyCosts, "Loading CosmWasm module: reply")
 
@@ -777,7 +821,7 @@ func (k Keeper) appendToContractHistory(ctx context.Context, contractAddr sdk.Ac
 	for _, e := range newEntries {
 		pos++
 		key := types.GetContractCodeHistoryElementKey(contractAddr, pos)
-		if err := store.Set(key, k.cdc.MustMarshal(&e)); err != nil { //nolint:gosec
+		if err := store.Set(key, k.cdc.MustMarshal(&e)); err != nil {
 			return err
 		}
 	}
@@ -834,7 +878,8 @@ func (k Keeper) QuerySmart(ctx context.Context, contractAddr sdk.AccAddress, req
 		return nil, err
 	}
 
-	setupCost := k.gasRegister.SetupContractCost(k.IsPinnedCode(sdkCtx, contractInfo.CodeID), len(req))
+	sdkCtx, discount := k.checkDiscountEligibility(sdkCtx, codeInfo.CodeHash, k.IsPinnedCode(ctx, contractInfo.CodeID))
+	setupCost := k.gasRegister.SetupContractCost(discount, len(req))
 	sdkCtx.GasMeter().ConsumeGas(setupCost, "Loading CosmWasm module: query")
 
 	// prepare querier
@@ -1156,6 +1201,22 @@ func (k Keeper) IsPinnedCode(ctx context.Context, codeID uint64) bool {
 		panic(err)
 	}
 	return ok
+}
+
+func (k Keeper) checkDiscountEligibility(ctx sdk.Context, checksum []byte, isPinned bool) (sdk.Context, bool) {
+	if isPinned {
+		return ctx, true
+	}
+
+	txContracts, ok := types.TxContractsFromContext(ctx)
+	if !ok || txContracts.GetContracts() == nil {
+		return ctx, false
+	} else if txContracts.Exists(checksum) {
+		return ctx, true
+	}
+
+	txContracts.AddContract(checksum)
+	return types.WithTxContracts(ctx, txContracts), false
 }
 
 // InitializePinnedCodes updates wasmvm to pin to cache all contracts marked as pinned
